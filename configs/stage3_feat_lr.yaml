@@ -1,0 +1,85 @@
+# E7 (pembanding model): sama dengan stage3_c0.yaml kecuali bagian yang ditandai [E7].
+# Eksperimen utama: C0 (sinyal PTB-XL 100 Hz penuh), ResNet1D-18, 5 seed.
+# Satu file untuk lokal dan Colab; hanya blok `profiles` yang berbeda per mesin.
+# Mengubah data/split/preprocess/model/training (kecuali daftar seed) WAJIB disertai run_name
+# baru: E2–E4 menolak berjalan jika train_hash berbeda dengan run E1.
+
+run_name: feat194_logreg_v1                # [E7]
+
+data:
+  classes: [NORM, MI, STTC, CD, HYP]
+  max_records_per_partition: null      # hanya untuk smoke test
+
+split:                                  # per patient_id
+  train_folds: [1, 2, 3, 4, 5, 6, 7, 8]
+  val_fold: 9                           # dibagi per pasien: VAL_A (seleksi epoch, T) / VAL_B (conformal)
+  test_fold: 10
+  val_a_fraction: 0.5
+  seed: 20261028
+
+preprocess:
+  highpass_hz: null                     # null = records100 apa adanya (seperti notebook & benchmark)
+  highpass_order: 2
+
+model:
+  name: features_logreg                 # [E7] 194 fitur ber-rumus + regresi logistik L2
+  c_grid: [0.01, 0.1, 1.0, 10.0]        # [E7] C per kelas dipilih via AUROC VAL_A
+
+training:
+  seeds: [0]                            # [E7] deterministik: satu run cukup
+  epochs: 30
+  batch_size: 256
+  lr: 0.001
+  weight_decay: 0.01
+  scheduler: cosine                     # cosine per langkah | none
+  pos_weight: none                      # none | balanced (w_k = N-/N+); none menjaga kalibrasi
+  amp: bf16                             # bf16 (CUDA) | none
+  eval_batch_size: 1024
+  cudnn_benchmark: true
+
+evaluation:
+  ece_bins: 15
+  bootstrap_resamples: 1000
+  bootstrap_seed: 7
+  triage_specificity: 0.90
+
+conformal:                              # E2
+  alphas: [0.01, 0.025, 0.05, 0.10, 0.20]
+  methods: [M0, M1, M2, M3]
+
+validity:                               # E3 (T2): split acak kalibrasi/uji pada positif TEST
+  alphas: [0.10, 0.20]
+  n_splits: 1000
+  pac_delta: 0.10
+  n_mc: 500
+  seed: 11
+  model_seed: null                      # null = seed pertama yang selesai
+
+subgroups:                              # E4
+  alpha: 0.10
+  min_positives: 30
+  age_edges: [50, 65, 80]
+  quality_columns: [baseline_drift, static_noise, burst_noise, electrodes_problems]
+
+calibration:                            # E5: pembanding kalibrasi post-hoc (fit VAL_A)
+  methods: [none, temp, temp_k, platt, isotonic, hist]
+  n_bins: 15
+  ref_alpha: 0.10                       # α untuk uji invariansi conformal M1 vs M2
+
+conformal_benchmark:                    # E6: pembanding prediktor himpunan (kalibrasi VAL_B)
+  alphas: [0.05, 0.10, 0.20]
+  pac_delta: 0.10
+
+profiles:
+  local:
+    raw_dir: data/raw/ptbxl
+    cache_dir: data/processed/ptbxl100
+    runs_dir: results/runs
+    test_access_log: results/TEST_ACCESS_LOG.md
+    device: cuda
+  colab:
+    raw_dir: "/content/drive/MyDrive/ptb xl/ptb-xl-a-large-publicly-available-electrocardiography-dataset-1.0.3"
+    cache_dir: "/content/drive/MyDrive/ptbxl_conformal/cache"
+    runs_dir: "/content/drive/MyDrive/ptbxl_conformal/results/runs"
+    test_access_log: "/content/drive/MyDrive/ptbxl_conformal/results/TEST_ACCESS_LOG.md"
+    device: cuda
